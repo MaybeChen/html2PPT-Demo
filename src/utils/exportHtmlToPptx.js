@@ -31,7 +31,9 @@ export async function exportTargetsToPptx(targets, fileName) {
   await exportToPptx(targets, {
     fileName,
     autoEmbedFonts: true,
-    svgAsVector: true,
+    // 为了降低中文在部分 Office 环境下的乱码风险，默认关闭 SVG 矢量文本导出。
+    // 如需更高矢量质量可改回 true，但需确保字体可用/可嵌入。
+    svgAsVector: false,
     layout: 'LAYOUT_WIDE',
     skipDownload: false,
   })
