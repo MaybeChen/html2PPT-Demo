@@ -18,13 +18,32 @@ export function createOffscreenStage() {
   return stage
 }
 
-export async function cloneIframeToStage(iframe, stage) {
+function cleanTextForPpt(node) {
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
+  const cleaned = []
+  while (walker.nextNode()) {
+    const textNode = walker.currentNode
+    const raw = textNode.nodeValue || ''
+    const normalized = raw
+      .normalize('NFC')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+      .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+    if (normalized !== raw) {
+      textNode.nodeValue = normalized
+      cleaned.push({ before: raw.slice(0, 24), after: normalized.slice(0, 24) })
+    }
+  }
+  return cleaned
+}
+
+export async function cloneIframeToStage(iframe, stage, options = {}) {
   await waitForIframeStable(iframe)
   const container = document.createElement('section')
   const clonedRoot = iframe.contentDocument.documentElement.cloneNode(true)
+  const cleanedTextNodes = options.sanitizeText ? cleanTextForPpt(clonedRoot) : []
   container.appendChild(clonedRoot)
   stage.appendChild(container)
-  return collectExportTargets(container)
+  return { targets: collectExportTargets(container), cleanedTextNodes }
 }
 
 export async function exportTargetsToPptx(targets, fileName) {
@@ -39,12 +58,12 @@ export async function exportTargetsToPptx(targets, fileName) {
   })
 }
 
-export async function exportFromIframe({ iframe, fileName }) {
+export async function exportFromIframe({ iframe, fileName, sanitizeText = true }) {
   const stage = createOffscreenStage()
   try {
-    const targets = await cloneIframeToStage(iframe, stage)
+    const { targets, cleanedTextNodes } = await cloneIframeToStage(iframe, stage, { sanitizeText })
     await exportTargetsToPptx(targets, fileName)
-    return { targetsCount: targets.length }
+    return { targetsCount: targets.length, cleanedTextNodes }
   } finally {
     stage.remove()
   }

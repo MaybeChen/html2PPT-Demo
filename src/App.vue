@@ -27,6 +27,10 @@
           <button :disabled="!activePath || loading" @click="exportCurrent">导出当前 HTML</button>
           <button :disabled="!htmlFiles.length || loading" @click="exportAll">导出全部 HTML</button>
           <button :disabled="!activePath || loading" @click="runFontDiagnostics">字体诊断</button>
+          <label class="toggle">
+            <input type="checkbox" v-model="sanitizeTextBeforeExport" />
+            导出前清洗文本（去隐藏字符）
+          </label>
           <span v-if="loading">导出中...</span>
         </div>
         <p v-if="error" class="error">{{ error }}</p>
@@ -65,6 +69,7 @@ const error = ref('')
 const loading = ref(false)
 const iframeRef = ref(null)
 const fontDiagnostics = ref([])
+const sanitizeTextBeforeExport = ref(true)
 const objectUrlCache = new Map()
 
 const activeFile = computed(() => htmlFiles.value.find((f) => f.path === activePath.value) || null)
@@ -168,7 +173,14 @@ async function exportCurrent() {
   loading.value = true
   try {
     await runFontDiagnostics()
-    await exportFromIframe({ iframe: iframeRef.value, fileName: `${activeFile.value.file.name.replace(/\.html?$/i, '')}.pptx` })
+    const result = await exportFromIframe({
+      iframe: iframeRef.value,
+      fileName: `${activeFile.value.file.name.replace(/\.html?$/i, '')}.pptx`,
+      sanitizeText: sanitizeTextBeforeExport.value,
+    })
+    if (result.cleanedTextNodes?.length) {
+      warnings.value.push(`已清洗 ${result.cleanedTextNodes.length} 处疑似异常文本字符（零宽/控制字符），可缓解“同字体部分乱码”。`)
+    }
     appendSlideSizeWarnings()
   } catch (e) {
     error.value = `导出失败：${e?.message || e}`
@@ -188,8 +200,13 @@ async function exportAll() {
       await loadPreview(item.path)
       await waitIframeLoad()
       await runFontDiagnostics()
-      const targets = await cloneIframeToStage(iframeRef.value, stage)
+      const { targets, cleanedTextNodes } = await cloneIframeToStage(iframeRef.value, stage, {
+        sanitizeText: sanitizeTextBeforeExport.value,
+      })
       allTargets.push(...targets)
+      if (cleanedTextNodes.length) {
+        warnings.value.push(`[${item.path}] 已清洗 ${cleanedTextNodes.length} 处疑似异常文本字符。`)
+      }
     }
     await exportTargetsToPptx(allTargets, 'all-html-files.pptx')
   } catch (e) {
@@ -215,6 +232,7 @@ onBeforeUnmount(() => {
 .sidebar button.active { background: #e6f4ff; border-color: #91caff; }
 .preview { border: 1px solid #ddd; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.toggle { font-size: 13px; color: #555; display: inline-flex; gap: 4px; align-items: center; }
 iframe { width: 100%; height: 58vh; border: 1px solid #ccc; }
 .warnings { margin: 0; padding-left: 20px; color: #d48806; }
 .diag-list { margin: 6px 0 0; padding-left: 20px; color: #333; }
