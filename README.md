@@ -33,3 +33,5 @@ npm run dev
   - 确认 HTML 使用 `UTF-8`（`<meta charset="UTF-8">`）；
   - 尽量使用明确的中文字体（如 `Noto Sans SC` / `Microsoft YaHei`），并确保字体文件可被本地目录模式读取；
   - 当前默认 `svgAsVector: false` 以降低部分 Office 环境中文乱码概率；若追求矢量文本可改回 `true` 并验证字体可用性。
+
+- 页面提供“字体诊断”按钮：会扫描当前预览中的中文文本元素并展示其最终 `font-family`，用于排查字体回退导致的乱码。

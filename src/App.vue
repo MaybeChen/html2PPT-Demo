@@ -26,12 +26,23 @@
         <div class="actions">
           <button :disabled="!activePath || loading" @click="exportCurrent">导出当前 HTML</button>
           <button :disabled="!htmlFiles.length || loading" @click="exportAll">导出全部 HTML</button>
+          <button :disabled="!activePath || loading" @click="runFontDiagnostics">字体诊断</button>
           <span v-if="loading">导出中...</span>
         </div>
         <p v-if="error" class="error">{{ error }}</p>
         <ul v-if="warnings.length" class="warnings">
           <li v-for="(w, idx) in warnings" :key="idx">⚠️ {{ w }}</li>
         </ul>
+
+        <details v-if="fontDiagnostics.length" open>
+          <summary>字体诊断报告（当前预览）</summary>
+          <ul class="diag-list">
+            <li v-for="item in fontDiagnostics" :key="item.id">
+              <b>{{ item.tag }}</b> | 文本: "{{ item.text }}" | 最终字体: {{ item.fontFamily }}
+            </li>
+          </ul>
+        </details>
+
         <iframe ref="iframeRef" sandbox="allow-scripts allow-same-origin" :srcdoc="previewHtml"></iframe>
       </section>
     </main>
@@ -43,6 +54,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { buildFileMap, revokeAllObjectUrls } from './utils/fileMap'
 import { rewriteHtmlAssets } from './utils/rewriteAssets'
 import { cloneIframeToStage, collectExportTargets, createOffscreenStage, exportFromIframe, exportTargetsToPptx } from './utils/exportHtmlToPptx'
+import { waitForIframeStable } from './utils/waitForRender'
 
 const fileMap = ref(new Map())
 const htmlFiles = ref([])
@@ -52,6 +64,7 @@ const warnings = ref([])
 const error = ref('')
 const loading = ref(false)
 const iframeRef = ref(null)
+const fontDiagnostics = ref([])
 const objectUrlCache = new Map()
 
 const activeFile = computed(() => htmlFiles.value.find((f) => f.path === activePath.value) || null)
@@ -60,6 +73,7 @@ function resetAssets() {
   revokeAllObjectUrls(objectUrlCache)
   previewHtml.value = ''
   warnings.value = []
+  fontDiagnostics.value = []
 }
 
 function updateFileState(files) {
@@ -90,6 +104,7 @@ async function loadPreview(path) {
   const result = await rewriteHtmlAssets(htmlText, item.path, fileMap.value, objectUrlCache)
   previewHtml.value = result.html
   warnings.value = result.warnings
+  fontDiagnostics.value = []
 }
 
 async function setActive(path) {
@@ -117,12 +132,42 @@ function appendSlideSizeWarnings() {
   })
 }
 
+async function runFontDiagnostics() {
+  if (!iframeRef.value?.contentDocument) return
+  await waitIframeLoad()
+  await waitForIframeStable(iframeRef.value)
+
+  const doc = iframeRef.value.contentDocument
+  const chineseTextElements = [...doc.querySelectorAll('body *')]
+    .filter((el) => /[\u3400-\u9FFF\uF900-\uFAFF]/.test(el.textContent || ''))
+    .slice(0, 50)
+
+  const report = chineseTextElements.map((el, idx) => {
+    const style = doc.defaultView.getComputedStyle(el)
+    return {
+      id: `${el.tagName}-${idx}`,
+      tag: el.tagName.toLowerCase(),
+      text: (el.textContent || '').trim().slice(0, 40),
+      fontFamily: style.fontFamily,
+    }
+  })
+
+  fontDiagnostics.value = report
+
+  const missingPreferredFonts = ['Microsoft YaHei', 'SimSun', 'Noto Sans SC']
+    .filter((name) => doc.fonts?.check?.(`16px "${name}"`) === false)
+
+  if (missingPreferredFonts.length) {
+    warnings.value.push(`可能缺少中文字体：${missingPreferredFonts.join(', ')}。请在系统安装字体或确保目录包含并正确引用字体文件。`)
+  }
+}
+
 async function exportCurrent() {
   if (!activeFile.value || !iframeRef.value) return
   error.value = ''
   loading.value = true
   try {
-    await waitIframeLoad()
+    await runFontDiagnostics()
     await exportFromIframe({ iframe: iframeRef.value, fileName: `${activeFile.value.file.name.replace(/\.html?$/i, '')}.pptx` })
     appendSlideSizeWarnings()
   } catch (e) {
@@ -142,6 +187,7 @@ async function exportAll() {
     for (const item of htmlFiles.value) {
       await loadPreview(item.path)
       await waitIframeLoad()
+      await runFontDiagnostics()
       const targets = await cloneIframeToStage(iframeRef.value, stage)
       allTargets.push(...targets)
     }
@@ -168,8 +214,9 @@ onBeforeUnmount(() => {
 .sidebar button { width: 100%; text-align: left; padding: 6px; border: 1px solid #ddd; background: #fff; }
 .sidebar button.active { background: #e6f4ff; border-color: #91caff; }
 .preview { border: 1px solid #ddd; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
-.actions { display: flex; gap: 8px; align-items: center; }
-iframe { width: 100%; height: 65vh; border: 1px solid #ccc; }
+.actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+iframe { width: 100%; height: 58vh; border: 1px solid #ccc; }
 .warnings { margin: 0; padding-left: 20px; color: #d48806; }
+.diag-list { margin: 6px 0 0; padding-left: 20px; color: #333; }
 .error { color: #cf1322; }
 </style>
