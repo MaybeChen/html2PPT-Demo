@@ -1,0 +1,4 @@
+node_modules
+.vscode
+package-lock.json
+packages/coworkUI/src/a2ui-runtime/assets/normal.png
